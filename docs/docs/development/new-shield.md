@@ -6,6 +6,9 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import KeymapExampleFile from '../keymap-example-file.md';
 
+import InterconnectTabs from "@site/src/components/interconnect-tabs";
+import Metadata from "@site/src/data/hardware-metadata.json";
+
 ## Overview
 
 This guide will walk through the steps necessary to add ZMK support for a keyboard the uses a (Pro Micro compatible) addon MCU board to provide the microprocessor.
@@ -17,7 +20,6 @@ The high level steps are:
 - (Optional) Add the matrix transform for mapping KSCAN row/column values to sane key positions. This is needed for non-rectangular keyboards, or where the underlying row/column pin arrangement does not map one to one with logical locations on the keyboard.
 - Add a default keymap, which users can override in their own configs as needed.
 - Add support for features such as encoders, OLED displays, or RGB underglow.
-- Update build.yml
 
 It may be helpful to review the upstream [shields documentation](https://docs.zephyrproject.org/2.5.0/guides/porting/shields.html#shields) to get a proper understanding of the underlying system before continuing.
 
@@ -49,23 +51,23 @@ shield to get it picked up for ZMK, `Kconfig.shield` and `Kconfig.defconfig`.
 
 ### Kconfig.shield
 
-The `Kconfig.shield` file defines any additional Kconfig settings that may be relevant when using this keyboard. For most keyboards, there is just one additional configuration value for the shield itself, e.g.:
+The `Kconfig.shield` file defines any additional Kconfig settings that may be relevant when using this keyboard. For most keyboards, there is just one additional configuration value for the shield itself.
 
-```
+```kconfig
 config SHIELD_MY_BOARD
-	def_bool $(shields_list_contains,my_board)
+    def_bool $(shields_list_contains,my_board)
 ```
 
-This will make sure the new configuration `SHIELD_MY_BOARD` is set to true whenever `my_board` is added as a shield in your build.
+This will make sure that a new configuration value named `SHIELD_MY_BOARD` is set to true whenever `my_board` is used as the shield name, either as the `SHIELD` variable [in a local build](build-flash.md) or in your `build.yaml` file [when using Github Actions](../customization). Note that this configuration value will be used in `Kconfig.defconfig` to set other properties about your shield, so make sure that they match.
 
-**For split boards**, you will need to add configurations for the left and right sides.
+**For split boards**, you will need to add configurations for the left and right sides. For example, if your split halves are named `my_board_left` and `my_board_right`, it would look like this:
 
-```
+```kconfig
 config SHIELD_MY_BOARD_LEFT
-	def_bool $(shields_list_contains,my_board_left)
+    def_bool $(shields_list_contains,my_board_left)
 
 config SHIELD_MY_BOARD_RIGHT
-	def_bool $(shields_list_contains,my_board_right)
+    def_bool $(shields_list_contains,my_board_right)
 ```
 
 ### Kconfig.defconfig
@@ -78,14 +80,14 @@ which controls the display name of the device over USB and BLE.
 The updated new default values should always be wrapped inside a conditional on the shield config name defined in the `Kconfig.shield` file. Here's the simplest example file.
 
 :::warning
-Do not make the keyboard name too long, otherwise the bluetooth advertising might fail and you will not be able to find your keyboard from your laptop / tablet.
+The keyboard name must be less than or equal to 16 characters in length, otherwise the bluetooth advertising might fail and you will not be able to find your keyboard from your device.
 :::
 
-```
+```kconfig
 if SHIELD_MY_BOARD
 
 config ZMK_KEYBOARD_NAME
-	default "My Awesome Keyboard"
+    default "My Board"
 
 endif
 ```
@@ -95,37 +97,32 @@ You'll also want to set which half is the central side. Most boards set it to th
 Then on the peripheral half, you'll want to turn USB on so that it shows USB status on displays properly.
 Finally, you'll want to turn on the split option for both sides. This can all be seen below.
 
-```
+```kconfig
 if SHIELD_MY_BOARD_LEFT
 
 config ZMK_KEYBOARD_NAME
-	default "My Awesome Keyboard Left"
+    default "My Board"
 
-config ZMK_SPLIT_BLE_ROLE_CENTRAL
-	default y
-
-endif
-
-if SHIELD_MY_BOARD_RIGHT
-
-config ZMK_KEYBOARD_NAME
-	default "My Awesome Keyboard Right"
+config ZMK_SPLIT_ROLE_CENTRAL
+    default y
 
 endif
 
 if SHIELD_MY_BOARD_LEFT || SHIELD_MY_BOARD_RIGHT
 
 config ZMK_SPLIT
-	default y
+    default y
 
 endif
 ```
 
 ## Shield Overlays
 
-![Labelled Pro Micro pins](../assets/pro-micro/pro-micro-pins-labelled.jpg)
+<InterconnectTabs items={Metadata}/>
 
-ZMK uses the green color coded pin names to generate devicetree node references. For example, to refer to the node `D0` in the devicetree files, use `&pro_micro_d 0` or to refer to `A1`, use `&pro_micro_a 1`.
+To use GPIO pins that are not part of the interconnects as described above, you can use the GPIO labels that are specific to each controller type.
+For instance, pins numbered `PX.Y` in nRF52840-based boards can be referred to via `&gpioX Y` labels.
+An example is `&gpio1 7` for the `P1.07` pin that the nice!nano exposes in the middle of the board.
 
 <Tabs
 defaultValue="unibody"
@@ -139,31 +136,33 @@ values={[
 The `<shield_name>.overlay` is the devicetree description of the keyboard shield that is merged with the primary board devicetree description before the build. For ZMK, this file at a minimum should include the chosen node named `zmk,kscan` that references a KSCAN driver instance. For a simple 3x3 macropad matrix,
 this might look something like:
 
-```
+```dts
 / {
-	chosen {
-		zmk,kscan = &kscan0;
-	};
+    chosen {
+        zmk,kscan = &kscan0;
+    };
 
-	kscan0: kscan_0 {
-		compatible = "zmk,kscan-gpio-matrix";
-		label = "KSCAN";
+    kscan0: kscan_0 {
+        compatible = "zmk,kscan-gpio-matrix";
+        label = "KSCAN";
         diode-direction = "col2row";
 
         col-gpios
-            = <&pro_micro_d 15 GPIO_ACTIVE_HIGH>
-            , <&pro_micro_d 14 GPIO_ACTIVE_HIGH>
-            , <&pro_micro_d 16 GPIO_ACTIVE_HIGH>
+            = <&pro_micro 15 GPIO_ACTIVE_HIGH>
+            , <&pro_micro 14 GPIO_ACTIVE_HIGH>
+            , <&pro_micro 16 GPIO_ACTIVE_HIGH>
             ;
 
-		row-gpios
-			= <&pro_micro_a 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-			, <&pro_micro_a 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-            , <&pro_micro_a 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-			;
-	};
+        row-gpios
+            = <&pro_micro 19 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            , <&pro_micro 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            , <&pro_micro 21 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
+            ;
+    };
 };
 ```
+
+See the [Keyboard Scan configuration documentation](../config/kscan.md) for details on configuring the KSCAN driver.
 
 </TabItem>
 
@@ -175,47 +174,47 @@ Unlike unibody keyboards, split keyboards have a core .dtsi file with shield ove
 It is preferred to define only the `col-gpios` or `row-gpios` in the common shield .dtsi, depending on the `diode-direction` value.
 For `col2row` directed boards like the iris, the shared .dtsi file may look like this:
 
-```
+```dts
 #include <dt-bindings/zmk/matrix_transform.h>
 
 / {
-	chosen {
-		zmk,kscan = &kscan0;
-		zmk,matrix_transform = &default_transform;
-	};
+    chosen {
+        zmk,kscan = &kscan0;
+        zmk,matrix_transform = &default_transform;
+    };
 
-	default_transform: keymap_transform_0 {
-		compatible = "zmk,matrix-transform";
-		columns = <16>;
-		rows = <4>;
+    default_transform: keymap_transform_0 {
+        compatible = "zmk,matrix-transform";
+        columns = <16>;
+        rows = <4>;
 // | SW6  | SW5  | SW4  | SW3  | SW2  | SW1  |                 | SW1  | SW2  | SW3  | SW4  | SW5  | SW6  |
 // | SW12 | SW11 | SW10 | SW9  | SW8  | SW7  |                 | SW7  | SW8  | SW9  | SW10 | SW11 | SW12 |
 // | SW18 | SW17 | SW16 | SW15 | SW14 | SW13 |                 | SW13 | SW14 | SW15 | SW16 | SW17 | SW18 |
 // | SW24 | SW23 | SW22 | SW21 | SW20 | SW19 | SW25 |   | SW25 | SW19 | SW20 | SW21 | SW22 | SW23 | SW24 |
 //                      | SW29 | SW28 | SW27 | SW26 |   | SW26 | SW27 | SW28 | SW29 |
-		map = <
+        map = <
 RC(0,0) RC(0,1) RC(0,2) RC(0,3) RC(0,4) RC(0,5)                 RC(0,6) RC(0,7) RC(0,8) RC(0,9) RC(0,10) RC(0,11)
 RC(1,0) RC(1,1) RC(1,2) RC(1,3) RC(1,4) RC(1,5)                 RC(1,6) RC(1,7) RC(1,8) RC(1,9) RC(1,10) RC(1,11)
 RC(2,0) RC(2,1) RC(2,2) RC(2,3) RC(2,4) RC(2,5)                 RC(2,6) RC(2,7) RC(2,8) RC(2,9) RC(2,10) RC(2,11)
 RC(3,0) RC(3,1) RC(3,2) RC(3,3) RC(3,4) RC(3,5) RC(4,2) RC(4,9) RC(3,6) RC(3,7) RC(3,8) RC(3,9) RC(3,10) RC(3,11)
-                        		RC(4,3) RC(4,4) RC(4,5) RC(4,6) RC(4,7) RC(4,8)
-		>;
-	};
+                                RC(4,3) RC(4,4) RC(4,5) RC(4,6) RC(4,7) RC(4,8)
+        >;
+    };
 
-	kscan0: kscan {
-		compatible = "zmk,kscan-gpio-matrix";
-		label = "KSCAN";
+    kscan0: kscan {
+        compatible = "zmk,kscan-gpio-matrix";
+        label = "KSCAN";
 
-		diode-direction = "col2row";
-		row-gpios
-			= <&pro_micro_d 6 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row A from the schematic file
-			, <&pro_micro_d 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row B from the schematic file
-			, <&pro_micro_d 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row C from the schematic file
-			, <&pro_micro_d 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row D from the schematic file
-			, <&pro_micro_d 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row E from the schematic file
-			;
+        diode-direction = "col2row";
+        row-gpios
+            = <&pro_micro 6 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row A from the schematic file
+            , <&pro_micro 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row B from the schematic file
+            , <&pro_micro 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row C from the schematic file
+            , <&pro_micro 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row D from the schematic file
+            , <&pro_micro 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // Row E from the schematic file
+            ;
 
-	};
+    };
 };
 ```
 
@@ -229,44 +228,42 @@ Furthermore, the column offset for the [matrix transform](#optional-matrix-trans
 because the keyboard's switch matrix is read from left to right, top to bottom.
 This is exemplified with the iris .overlay files.
 
-```
-// iris_left.overlay
-
+```dts title=iris_left.overlay
 #include "iris.dtsi" // Notice that the main dtsi files are included in the overlay.
 
 &kscan0 {
-	col-gpios
-		= <&pro_micro_a 1 GPIO_ACTIVE_HIGH> // col1 in the schematic
-		, <&pro_micro_a 0 GPIO_ACTIVE_HIGH> // col2 in the schematic
-		, <&pro_micro_d 15 GPIO_ACTIVE_HIGH> // col3 in the schematic
-		, <&pro_micro_d 14 GPIO_ACTIVE_HIGH> // col4 in the schematic
-		, <&pro_micro_d 16 GPIO_ACTIVE_HIGH> // col5 in the schematic
-		, <&pro_micro_d 10 GPIO_ACTIVE_HIGH> // col6 in the schematic
-		;
+    col-gpios
+        = <&pro_micro 19 GPIO_ACTIVE_HIGH> // col1 in the schematic
+        , <&pro_micro 18 GPIO_ACTIVE_HIGH> // col2 in the schematic
+        , <&pro_micro 15 GPIO_ACTIVE_HIGH> // col3 in the schematic
+        , <&pro_micro 14 GPIO_ACTIVE_HIGH> // col4 in the schematic
+        , <&pro_micro 16 GPIO_ACTIVE_HIGH> // col5 in the schematic
+        , <&pro_micro 10 GPIO_ACTIVE_HIGH> // col6 in the schematic
+        ;
 };
 ```
 
-```
-// iris_right.overlay
-
+```dts title=iris_right.overlay
 #include "iris.dtsi"
 
 &default_transform { // The matrix transform for this board is 6 columns over because the left half is 6 columns wide according to the matrix.
-	col-offset = <6>;
+    col-offset = <6>;
 };
 
 &kscan0 {
-	col-gpios
-		= <&pro_micro_d 10 GPIO_ACTIVE_HIGH> // col6 in the schematic
-		, <&pro_micro_d 16 GPIO_ACTIVE_HIGH> // col5 in the schematic
-		, <&pro_micro_d 14 GPIO_ACTIVE_HIGH> // col4 in the schematic
-		, <&pro_micro_d 15 GPIO_ACTIVE_HIGH> // col3 in the schematic
-		, <&pro_micro_a 0 GPIO_ACTIVE_HIGH>  // col2 in the schematic
-		, <&pro_micro_a 1 GPIO_ACTIVE_HIGH>  // col1 in the schematic
-		;
+    col-gpios
+        = <&pro_micro 10 GPIO_ACTIVE_HIGH> // col6 in the schematic
+        , <&pro_micro 16 GPIO_ACTIVE_HIGH> // col5 in the schematic
+        , <&pro_micro 14 GPIO_ACTIVE_HIGH> // col4 in the schematic
+        , <&pro_micro 15 GPIO_ACTIVE_HIGH> // col3 in the schematic
+        , <&pro_micro 18 GPIO_ACTIVE_HIGH>  // col2 in the schematic
+        , <&pro_micro 19 GPIO_ACTIVE_HIGH>  // col1 in the schematic
+        ;
 };
 
 ```
+
+See the [Keyboard Scan configuration documentation](../config/kscan.md) for details on configuring the KSCAN driver.
 
 ### .conf files (Split Shields)
 
@@ -280,11 +277,13 @@ For example, a split board called `my_awesome_split_board` would have the follow
 
 In most case you'll only need to use the .conf file that affects both halves of a split board. It's used for adding features like deep-sleep or rotary encoders.
 
-```
-// my_awesome_split_board.conf
-
+```ini title=my_awesome_split_board.conf
 CONFIG_ZMK_SLEEP=y
 ```
+
+:::note
+The shared configuration in `my_awesome_split_board.conf` is only applied when you are building with a [`zmk-config` folder](build-flash#building-from-zmk-config-folder) and when it is present at `config/my_awesome_split_board.conf`. If you are not using a `zmk-config` folder, you will need to include the shared configuration in both `my_awesome_split_board_left.conf` and `my_awesome_split_board_right.conf` files.
+:::
 
 </TabItem>
 </Tabs>
@@ -301,7 +300,7 @@ the logical key location as perceived by the end user. All _keymap_ mappings act
 
 _Without_ a matrix transform, that intentionally map each key position to the row/column pair that position corresponds to, the default equation to determine that is:
 
-```
+```c
 ($row * NUMBER_OF_COLUMNS) + $column
 ```
 
@@ -311,32 +310,32 @@ Whenever that default key position mapping is insufficient, the `<shield_name>.o
 
 Here is an example for the [nice60](https://github.com/Nicell/nice60), which uses an efficient 8x8 GPIO matrix, and uses a transform:
 
-```
+```dts
 #include <dt-bindings/zmk/matrix_transform.h>
 
 / {
-	chosen {
-		zmk,kscan = &kscan0;
-		zmk,matrix_transform = &default_transform;
-	};
+    chosen {
+        zmk,kscan = &kscan0;
+        zmk,matrix_transform = &default_transform;
+    };
 
-	default_transform: keymap_transform_0 {
-		compatible = "zmk,matrix-transform";
-		columns = <8>;
-		rows = <8>;
+    default_transform: keymap_transform_0 {
+        compatible = "zmk,matrix-transform";
+        columns = <8>;
+        rows = <8>;
 // | MX1  | MX2  | MX3  | MX4  | MX5  | MX6  | MX7  | MX8  | MX9  | MX10 | MX11 | MX12 | MX13 |    MX14     |
 // |   MX15   | MX16 | MX17 | MX18 | MX19 | MX20 | MX21 | MX22 | MX23 | MX34 | MX25 | MX26 | MX27 |  MX28   |
 // |    MX29    | MX30 | MX31 | MX32 | MX33 | MX34 | MX35 | MX36 | MX37 | MX38 | MX39 | MX40 |     MX41     |
 // |     MX42      | MX43 | MX44 | MX45 | MX46 | MX47 | MX48 | MX49 | MX50 | MX51 | MX52 |       MX53       |
 // |  MX54  |  MX55  |  MX56  |                  MX57                   |  MX58  |  MX59  |  MX60  |  MX61  |
-		map = <
+        map = <
 RC(3,0)  RC(2,0) RC(1,0) RC(0,0) RC(1,1) RC(0,1) RC(0,2) RC(1,3) RC(0,3) RC(1,4) RC(0,4) RC(0,5) RC(1,6)     RC(1,7)
 RC(4,0)    RC(4,1) RC(3,1) RC(2,1) RC(2,2) RC(1,2) RC(2,3) RC(3,4) RC(2,4) RC(2,5) RC(1,5) RC(2,6) RC(2,7)   RC(3,7)
 RC(5,0)     RC(5,1) RC(5,2) RC(4,2) RC(3,2) RC(4,3) RC(3,3) RC(4,4) RC(4,5) RC(3,5) RC(4,6) RC(3,6)          RC(4,7)
 RC(6,0)       RC(6,1) RC(6,2) RC(6,3) RC(5,3) RC(6,4) RC(5,4) RC(6,5) RC(5,5) RC(6,6) RC(5,6)                RC(5,7)
 RC(7,0)    RC(7,1)   RC(7,2)                     RC(7,3)                    RC(7,5)    RC(7,6)    RC(6,7)    RC(7,7)
-		>;
-	};
+        >;
+    };
 ```
 
 Some important things to note:
@@ -344,6 +343,8 @@ Some important things to note:
 - The `#include <dt-bindings/zmk/matrix_transform.h>` is critical. The `RC` macro is used to generate the internal storage in the matrix transform, and is actually replaced by a C preprocessor before the final devicetree is compiled into ZMK.
 - `RC(row, column)` is placed sequentially to define what row and column values that position corresponds to.
 - If you have a keyboard with options for `2u` keys in certain positions, or break away portions, it is a good idea to set the chosen `zmk,matrix_transform` to the default arrangement, and include _other_ possible matrix transform nodes in the devicetree that users can select in their user config by overriding the chosen node.
+
+See the [matrix transform section](../config/kscan.md#matrix-transform) in the Keyboard Scan configuration documentation for details and more examples of matrix transforms.
 
 ## Default Keymap
 
@@ -364,9 +365,35 @@ The two `#include` lines at the top of the keymap are required in order to bring
 Further documentation on behaviors and bindings is forthcoming, but a summary of the current behaviors you can bind to key positions is as follows:
 
 - `kp` is the "key press" behavior, and takes a single binding argument of the key code from the 'keyboard/keypad" HID usage table.
-- `mo` is the "momentary layer" behaviour, and takes a single binding argument of the numeric ID of the layer to momentarily enable when that key is held.
+- `mo` is the "momentary layer" behavior, and takes a single binding argument of the numeric ID of the layer to momentarily enable when that key is held.
 - `trans` is the "transparent" behavior, useful to be place in higher layers above `mo` bindings to be sure the key release is handled by the lower layer. No binding arguments are required.
 - `mt` is the "mod-tap" behavior, and takes two binding arguments, the modifier to use if held, and the keycode to send if tapped.
+
+## Metadata
+
+ZMK makes use of an additional metadata YAML file for all boards and shields to provide high level information about the hardware to be incorporated into setup scripts/utilities, website hardware list, etc.
+
+The naming convention for metadata files is `{item_id}.zmk.yml`, where the `item_id` is the board/shield identifier, including version information but excluding any optional split `_left`/`_right` suffix, e.g. `corne.zmk.yml` or `nrfmicro_11.zmk.yml`.
+
+Here is a sample `corne.zmk.yml` file from the repository:
+
+```yaml
+file_format: "1"
+id: corne
+name: Corne
+type: shield
+url: https://github.com/foostan/crkbd/
+requires: [pro_micro]
+exposes: [i2c_oled]
+features:
+  - keys
+  - display
+siblings:
+  - corne_left
+  - corne_right
+```
+
+You should place a properly named `foo.zmk.yml` file in the directory next to your other shield values, and fill it out completely and accurately. See [Hardware Metadata Files](/docs/development/hardware-metadata-files) for the full details.
 
 ## Adding Features
 
@@ -386,7 +413,7 @@ values={[
 
 In your configuration file you will need to add the following lines so that the encoders can be enabled/disabled:
 
-```
+```ini
 # Uncomment to enable encoder
 # CONFIG_EC11=y
 # CONFIG_EC11_TRIGGER_GLOBAL_THREAD=y
@@ -402,14 +429,15 @@ If building locally for split boards, you may need to add these lines to the spe
 <TabItem value = "dtsi">
 In your device tree file you will need to add the following lines to define the encoder sensor:
 
-```
+```dts
 left_encoder: encoder_left {
-		compatible = "alps,ec11";
-		label = "LEFT_ENCODER";
-		a-gpios = <PIN_A (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-		b-gpios = <PIN_B (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-		resolution = <4>;
-	};
+        compatible = "alps,ec11";
+        label = "LEFT_ENCODER";
+        a-gpios = <PIN_A (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        b-gpios = <PIN_B (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        resolution = <4>;
+        status = "disabled";
+    };
 ```
 
 Here you will have to replace PIN_A and PIN_B with the appropriate pins that your PCB utilizes for the encoder(s). For keyboards that use the Pro Micro or any of the Pro Micro replacements, Sparkfun's [Pro Micro Hookup Guide](https://learn.sparkfun.com/tutorials/pro-micro--fio-v3-hookup-guide/hardware-overview-pro-micro) has a pinout diagram that can be useful to determine the right pins. Reference either the blue numbers labeled "Arduino" (digital pins) or the green numbers labeled "Analog" (analog pins). For pins that are labeled as both digital and analog, refer to your specific board's .dtsi file to determine how you should refer to that pin.
@@ -418,11 +446,11 @@ Add additional encoders as necessary by duplicating the above lines, replacing `
 
 Once you have defined the encoder sensors, you will have to add them to the list of sensors:
 
-```
-sensors {
-		compatible = "zmk,keymap-sensors";
-		sensors = <&left_encoder &right_encoder>;
-	};
+```dts
+    sensors {
+        compatible = "zmk,keymap-sensors";
+        sensors = <&left_encoder &right_encoder>;
+    };
 ```
 
 In this example, a left_encoder and right_encoder are both added. Additional encoders can be added with spaces separating each, and the order they are added here determines the order in which you define their behavior in your keymap.
@@ -431,9 +459,9 @@ In this example, a left_encoder and right_encoder are both added. Additional enc
 <TabItem value = "overlay">
 Add the following lines to your overlay file(s) to enable the encoder:
 
-```
+```dts
 &left_encoder {
-	status = "okay";
+    status = "okay";
 };
 ```
 
@@ -445,7 +473,7 @@ For split keyboards, make sure to add left hand encoders to the left .overlay fi
 <TabItem value = "keymap">
 Add the following line to your keymap file to add default encoder behavior bindings:
 
-```
+```dts
 sensor-bindings = <&inc_dec_kp C_VOL_UP C_VOL_DN>;
 ```
 
@@ -459,7 +487,7 @@ Add additional bindings as necessary to match the default number of encoders on 
 Once you've fully created the new keyboard shield definition,
 you should be able to test with a build command like:
 
-```
+```sh
 west build --pristine -b proton_c -- -DSHIELD=my_board
 ```
 
@@ -472,7 +500,7 @@ Alternatively, if your board supports flashing and you're not developing from
 within a Dockerized environment, enable Device Firmware Upgrade (DFU) mode on
 your board and run the following command to test your build:
 
-```
+```sh
 west flash
 ```
 
@@ -483,37 +511,3 @@ Please have a look at documentation specific to
 Further testing your keyboard shield without altering the root keymap file can be done with the use of `-DZMK_CONFIG` in your `west build` command,
 shown [here](build-flash.md#building-from-zmk-config-folder)
 :::
-
-## Updating `build.yml`
-
-Before publishing your shield to the public via a PR, navigate to `build.yml` found in `.github/workflows` and add your shield to the appropriate list. An example edit to `build.yml` is shown below.
-
-```
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    name: Build Test
-    strategy:
-      matrix:
-        board: [proton_c, nice_nano, bluemicro840_v1, nrfmicro_13]
-        shield:
-          - corne_left
-          - corne_right
-          - kyria_left
-          - kyria_right
-          - lily58_left
-          - lily58_right
-          - iris_left
-          - iris_right
-          - romac
-	  - <MY_BOARD>
-	  - <MY_SPLIT_BOARD_left>
-	  - <MY_SPLIT_BOARD_right>
-        include:
-          - board: proton_c
-            shield: clueboard_california
-```
-
-:::note
-Notice that both the left and right halves of a split board need to be added to the list of shields for proper error checking.
-:::note
