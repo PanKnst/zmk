@@ -1,15 +1,13 @@
 #include <zephyr/init.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-// #include <drivers/led.h>
 #include <zephyr/drivers/gpio.h>
-
 #include <zephyr/logging/log.h>
-LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
-
 #include <zmk/keymap.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/layer_state_changed.h>
+
+LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 /* The devicetree node identifier for the "led0" alias. */
 #define LED1_NODE DT_ALIAS(led1)
@@ -17,7 +15,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define LED3_NODE DT_ALIAS(led3)
 
 #if DT_NODE_HAS_STATUS(LED1_NODE, okay)
-#define LED1 DT_GPIO_LABEL_BY_IDX(LED1_NODE, gpios, 0)
+#define LED1 DEVICE_DT_GET(DT_GPIO_CTLR(LED1_NODE, gpios))
 #define PIN1 DT_GPIO_PIN(LED1_NODE, gpios)
 #define FLAGS1 DT_GPIO_FLAGS(LED1_NODE, gpios)
 #else
@@ -25,7 +23,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #endif
 
 #if DT_NODE_HAS_STATUS(LED2_NODE, okay)
-#define LED2 DT_GPIO_LABEL_BY_IDX(LED2_NODE, gpios, 0)
+#define LED2 DEVICE_DT_GET(DT_GPIO_CTLR(LED2_NODE, gpios))
 #define PIN2 DT_GPIO_PIN(LED2_NODE, gpios)
 #define FLAGS2 DT_GPIO_FLAGS(LED2_NODE, gpios)
 #else
@@ -33,21 +31,19 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #endif
 
 #if DT_NODE_HAS_STATUS(LED3_NODE, okay)
-#define LED3 DT_GPIO_LABEL_BY_IDX(LED3_NODE, gpios, 0)
+#define LED3 DEVICE_DT_GET(DT_GPIO_CTLR(LED3_NODE, gpios))
 #define PIN3 DT_GPIO_PIN(LED3_NODE, gpios)
 #define FLAGS3 DT_GPIO_FLAGS(LED3_NODE, gpios)
 #else
 #error "Unsupported board: led3 devicetree alias is not defined"
 #endif
 
-static void led_pin_init(const char *name, gpio_pin_t pin, gpio_dt_flags_t dt_flags) {
-    const struct device *dev = device_get_binding(name);
+static void led_pin_init(const struct device *dev, gpio_pin_t pin, gpio_dt_flags_t dt_flags) {
     gpio_pin_configure(dev, pin, GPIO_OUTPUT_ACTIVE | dt_flags);
     gpio_pin_set(dev, pin, 0);
 }
 
-static void led_pin_set(const char *name, gpio_pin_t pin, int value) {
-    const struct device *dev = device_get_binding(name);
+static void led_pin_set(const struct device *dev, gpio_pin_t pin, int value) {
     gpio_pin_set(dev, pin, value);
 }
 
